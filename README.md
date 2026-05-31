@@ -29,7 +29,7 @@ Westlake University
 
 Instead of searching within a fixed hypothesis space, PiEvo treats discovery as **Bayesian optimization over an expanding principle space**. The system combines principle induction, hypothesis generation, and experimental evaluation in a closed-loop workflow, allowing the agent team to revise its scientific worldview as new evidence arrives.
 
-This repository is the **official implementation** accompanying our PiEvo paper and is designed for **scientific researchers** interested in LLM-based autonomous discovery, principle-aware reasoning, and configurable multi-agent experimentation.
+This repository is the **official implementation** accompanying our `PiEvo` paper and is designed for **scientific researchers** interested in LLM-based autonomous discovery, principle-aware reasoning, and configurable multi-agent experimentation.
 
 <div align="center">
   <img src="assets/illustration.png" alt="PiEvo Illustration" width="420"/>
@@ -84,15 +84,19 @@ For full experimental details, please refer to the paper: **[Principle-Evolvable
 PiEvo organizes discovery as a structured multi-agent research process:
 
 ### 1. Principle Agent
+
 Proposes or refines scientific principles that capture the deeper laws, mechanisms, or patterns relevant to the task.
 
 ### 2. Hypothesis Agent
+
 Generates concrete, testable candidates grounded in the active scientific principles.
 
 ### 3. Experiment Agent
+
 Evaluates selected candidates using configured tools and returns structured outcomes.
 
 ### 4. Principle-Space Update
+
 PiEvo updates beliefs over principles, tracks anomalous observations, and uses the accumulated evidence to guide future exploration and exploitation.
 
 This design makes PiEvo more than a prompt chain: it is a **research workflow engine** for principle-aware scientific search.
@@ -187,6 +191,7 @@ Additional research and tuning arguments are available in [pievo/main.py](pievo/
 PiEvo is designed as a research framework rather than a single fixed demo.
 
 ### Define a new task
+
 Edit [config/task.yaml](config/task.yaml) to describe:
 
 - the scientific objective,
@@ -196,6 +201,7 @@ Edit [config/task.yaml](config/task.yaml) to describe:
 - environment variables for auxiliary services.
 
 ### Configure agent behavior
+
 Edit [config/model.yaml](config/model.yaml) to customize:
 
 - agent system prompts,
@@ -205,6 +211,7 @@ Edit [config/model.yaml](config/model.yaml) to customize:
 - tool access per agent.
 
 ### Add or replace experimental tools
+
 Extend the registry in [pievo/tools/](pievo/tools/) by adding decorator-registered tools for your domain.
 
 This makes PiEvo adaptable to a broad range of scientific discovery settings, from toy optimization tasks to domain-specific computational workflows.
