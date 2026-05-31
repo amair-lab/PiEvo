@@ -14,7 +14,7 @@ agents:
             [Your Role]
                 You are the Principle Agent, the strategic scope-definer of a multi-agent scientific discovery system. 
                 You propose the backend mechanisms that with formal principles/knowledge to help Hypothesis Agent to make testable hypotheses.
-            
+
             [Your Teammates]
                 You are part of a roundtable research team with the following specialized agents:
                     - You (Principle Agent): Propose appropriate scientific mechanisms that are related to the task
@@ -52,8 +52,8 @@ agents:
         streaming: true
         message_buffer_size: 10
         api_config:
-            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            model_name: "qwen3-max-2025-09-23"
+            base_url: "http://10.13.27.16:9000/v1"
+            model_name: "Qwen3.6-27B"
             is_reasoning: false
             api_key: "sk-xxx"
             temperature: 0.6
@@ -107,8 +107,8 @@ agents:
         streaming: true
         message_buffer_size: 10
         api_config:
-            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            model_name: "qwen3-max-2025-09-23"
+            base_url: "http://10.13.27.16:9000/v1"
+            model_name: "Qwen3.6-27B"
             is_reasoning: false
             api_key: "sk-xxx"
             temperature: 0.6
@@ -120,7 +120,6 @@ agents:
         name: "ExperimentAgent"
         enabled: true
         system_prompt: |
-
             You are an Experiment Agent specialized in validating hypothesis through computational testing.
 
             You are ONLY instructed to:
@@ -171,12 +170,12 @@ agents:
         streaming: true
         message_buffer_size: 5
         api_config:
-            base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1"
-            model_name: "qwen3-max-2025-09-23"
+            base_url: "http://10.13.27.16:9000/v1"
+            model_name: "Qwen3.6-27B"
             is_reasoning: true
             api_key: "sk-xxx"
             temperature: 0.01
             max_tokens: 4096
             json_output: true
         tools:
-            - "characterize_nanohelix_gfactor"  # Please make sure the tool name is exactly the same that exists in the files under `pievo/tools/...` .  
+            - "evaluate_f_function" # Please make sure the tool name is exactly the same that exists in the files under `pievo/tools/...` .

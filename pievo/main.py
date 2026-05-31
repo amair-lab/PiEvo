@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 import asyncio
 import os
-import sys
-import tempfile
-import time
 
-from autogen_ext.code_executors.docker import DockerCommandLineCodeExecutor
-from autogen_ext.tools.code_execution import PythonCodeExecutionTool
+try:
+    from autogen_ext.code_executors.docker import DockerCommandLineCodeExecutor
+    from autogen_ext.tools.code_execution import PythonCodeExecutionTool
+except ImportError:
+    DockerCommandLineCodeExecutor = None
+    PythonCodeExecutionTool = None
+
+from pievo.utils.process import ServerProcessManager
+from pievo.server import start_server
 
 import argparse
 import logging
@@ -25,13 +29,45 @@ from pievo.utils.config import (
 )
 
 from autogen_agentchat.agents import AssistantAgent, UserProxyAgent
-from autogen_agentchat.conditions import MaxMessageTermination, TextMentionTermination
+from autogen_agentchat.conditions import TextMentionTermination
 from autogen_agentchat.ui import Console
 
 from autogen_core.models import (
     ModelFamily,
 )
 from autogen_ext.models.openai import OpenAIChatCompletionClient
+
+
+def create_thinking_client(
+    *,
+    is_reasoning: bool,
+    top_k: int = 20,
+    top_p: float = 0.8,
+    presence_penalty: float = 1.5,
+    repetition_penalty: float = 1.0,
+    **client_kwargs: Any,
+) -> OpenAIChatCompletionClient:
+    client = OpenAIChatCompletionClient(**client_kwargs)
+
+    extra_body = {
+        "top_k": top_k,
+        "top_p": top_p,
+        "presence_penalty": presence_penalty,
+        "repetition_penalty": repetition_penalty,
+        "chat_template_kwargs": {"enable_thinking": is_reasoning},
+    }
+
+    original = client._process_create_args
+
+    def patched(*args: Any, **kwargs: Any):
+        params = original(*args, **kwargs)
+        params.create_args["extra_body"] = extra_body
+        return params
+
+    client._process_create_args = patched
+    return client
+
+
 from autogen_ext.models.cache import ChatCompletionCache, CHAT_CACHE_VALUE_TYPE
 from autogen_ext.cache_store.diskcache import DiskCacheStore
 from diskcache import Cache
@@ -39,9 +75,7 @@ from diskcache import Cache
 from pievo.utils.console import Console
 from pievo.group.evolveflow import PiEvo
 
-logging.basicConfig(
-    level=logging.INFO, format="%(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(levelname)s - %(message)s")
 
 evolve_logger = logging.getLogger("pievo.group.evolveflow")
 evolve_logger.setLevel(logging.INFO)
@@ -51,6 +85,7 @@ formatter = logging.Formatter("%(levelname)s - %(message)s")
 handler.setFormatter(formatter)
 evolve_logger.addHandler(handler)
 evolve_logger.propagate = False
+
 
 class PiFlow:
     def __init__(
@@ -100,15 +135,19 @@ class PiFlow:
             self.cache_storage = None
 
         for key in self.task_config.get("environment").keys():
-            os.environ[key] = self.task_config.get("environment")[key]
+            try:
+                os.environ[key] = self.task_config.get("environment")[key]
+            except Exception as e:
+                logging.error(
+                    f"Error occurred while setting environment variables: {e}. Skipping environment variable setup. "
+                )
 
         # Automatically load all registered tools
         self.available_tools = tools.create_function_tools_dict()
 
         self._set_util_client(cache_dir=self.cache_dir)
 
-
-        # If off PiEvo, this term will be None. 
+        # If off PiEvo, this term will be None.
         self.pievo = PiEvo(
             task=self.task_config.get("task"),
             output_file=os.path.join(save_dir, f"submissions.json"),
@@ -118,6 +157,9 @@ class PiFlow:
             anomaly_threshold=args.anomaly_threshold,
             warm_up_rounds=args.warm_up_rounds,
             new_principle_prior_mass=args.new_principle_prior_mass,
+            monte_carlo_samples=args.monte_carlo_samples,
+            initial_absolute_sigma=args.initial_absolute_sigma,
+            llm_judge=args.enable_llm_judge,
             off_pievo=self.off_pievo,
         )
 
@@ -127,14 +169,14 @@ class PiFlow:
     def _create_team(self):
         """Create the team after agents have been initialized."""
         agent_rotation_order = ["principle", "hypothesis", "experiment"]
-        
+
         # Create submission patterns for each agent type
         submission_patterns = {
             "hypothesis": r"HYPOTHESIS_SUBMISSION\s*(.+)",
             "experiment": r"EXPERIMENT_SUBMISSION\s*(.+)",
             "principle": r"PRINCIPLE_SUBMISSION\s*(.+)",
         }
-        
+
         self.team = SubmissionBasedGroupChat(
             participants=[agent for agent in self.agents.values()],
             model_client=self.util_client,  # Required for SelectorGroupChat
@@ -164,13 +206,16 @@ class PiFlow:
             model=os.getenv("UTIL_LLM_CONFIG_NAME"),
             temperature=float(os.getenv("UTIL_LLM_CONFIG_TEMPERATURE")),
             max_tokens=int(os.getenv("UTIL_LLM_CONFIG_MAX_TOKENS")),
+            timeout=300,
+            max_retries=5,
             model_info={
-                "vision": False,
+                "vision": True,
                 "function_calling": False,
                 "json_output": False,
                 "family": ModelFamily.GPT_4,
                 "structured_output": False,
             },
+            extra_create_args={"stream_options": {"include_usage": True}},
         )
 
         if cache_dir is not None:
@@ -200,23 +245,37 @@ class PiFlow:
         if not api_key:
             raise ValueError("API key is required for OpenAIChatCompletionClient")
 
-        openai_client: OpenAIChatCompletionClient = OpenAIChatCompletionClient(
+        is_reasoning = llm_config.get("is_reasoning", False)
+
+        openai_client: OpenAIChatCompletionClient = create_thinking_client(
+            is_reasoning=is_reasoning,
+            top_k=llm_config.get("top_k", 20),
+            top_p=llm_config.get("top_p", 0.8),
+            presence_penalty=llm_config.get("presence_penalty", 1.5),
+            repetition_penalty=llm_config.get("repetition_penalty", 1.0),
             api_key=api_key if not self.agent_api_key else self.agent_api_key,
-            base_url=llm_config.get("base_url", "https://api.openai.com/v1") if not self.agent_base_url else self.agent_base_url,
-            model=llm_config.get("model_name", "gpt-4o") if not self.agent_model_name else self.agent_model_name,
-            temperature=llm_config.get("temperature", 0.7) if not self.agent_temperature else self.agent_temperature,
-            max_tokens=llm_config.get("max_tokens", 2048) if not self.agent_max_tokens else self.agent_max_tokens,
+            base_url=llm_config.get("base_url", "https://api.openai.com/v1")
+            if not self.agent_base_url
+            else self.agent_base_url,
+            model=llm_config.get("model_name", "gpt-4o")
+            if not self.agent_model_name
+            else self.agent_model_name,
+            temperature=llm_config.get("temperature", 0.7)
+            if not self.agent_temperature
+            else self.agent_temperature,
+            max_tokens=llm_config.get("max_tokens", 2048)
+            if not self.agent_max_tokens
+            else self.agent_max_tokens,
+            timeout=300,
+            max_retries=5,
             model_info={
-                "vision": False,
+                "vision": llm_config.get("vision", False),
                 "function_calling": True,
                 "json_output": llm_config.get("json_output", False),
-                "family": (
-                    ModelFamily.R1
-                    if llm_config.get("is_reasoning", False)
-                    else ModelFamily.GEMINI_2_5_PRO
-                ),
+                "family": (ModelFamily.R1 if is_reasoning else ModelFamily.GPT_4O),
                 "structured_output": False,
             },
+            extra_create_args={"stream_options": {"include_usage": True}},
         )
 
         if cache_dir is not None:
@@ -229,7 +288,6 @@ class PiFlow:
             return ChatCompletionCache(openai_client, agent_cache_storage)
         else:
             return openai_client
-
 
     async def _create_agents(self) -> None:
         """Create all agents based on the configuration."""
@@ -271,7 +329,9 @@ class PiFlow:
                     name=agent_name,
                     system_message=agent_config.get("system_prompt", None),
                     description=agent_config.get("description", ""),
-                    tools=[code_tool, ],
+                    tools=[
+                        code_tool,
+                    ],
                     model_context=BufferedChatCompletionContext(
                         buffer_size=agent_config.get("message_buffer_size", 10)
                     ),
@@ -308,9 +368,12 @@ class PiFlow:
                     model_context=BufferedChatCompletionContext(
                         buffer_size=agent_config.get("message_buffer_size", 10)
                     ),
+                    max_tool_iterations=agent_config.get("max_tool_iterations", 1),
                     strategy=self.pievo,
                 )
-
+                self.pievo.register_client(
+                    self.agents[agent_name].llm_client, agent_name
+                )
 
     @classmethod
     async def create(
@@ -331,33 +394,67 @@ async def run_pievo():
     parser = argparse.ArgumentParser()
 
     # PIEVO
-    parser.add_argument("--sigma", type=float,                      default=0.01, help="range: [0.01, 0.3, 0.6, 0.9]")
-    parser.add_argument("--anomaly_threshold", type=float,          default=0.85, help="range: [0.15, 0.5, 0.85]")
-    parser.add_argument("--warm_up_rounds", type=int,               default=10,   help="range: [5, 10, 15]")
-    parser.add_argument("--new_principle_prior_mass", type=float,   default=1e-3, help="Fixed.")
+    parser.add_argument(
+        "--sigma", type=float, default=0.01, help="range: [0.01, 0.3, 0.6, 0.9]"
+    )
+    parser.add_argument(
+        "--anomaly_threshold", type=float, default=0.85, help="range: [0.15, 0.5, 0.85]"
+    )
+    parser.add_argument(
+        "--warm_up_rounds", type=int, default=10, help="range: [5, 10, 15]"
+    )
+    parser.add_argument(
+        "--new_principle_prior_mass", type=float, default=1e-3, help="Fixed."
+    )
+    parser.add_argument("--monte_carlo_samples", type=int, default=25, help="Fixed.")
+    parser.add_argument(
+        "--initial_absolute_sigma", type=float, default=0.01, help="Fixed."
+    )
 
     # INSTRUCTIONS
-    parser.add_argument("--high_confidence_threshold", type=float,  default=0.9,  help="range: [0.6, 0.7, 0.8, 0.9]")
-    parser.add_argument("--anomaly_cnt_threshold", type=int,        default=3,    help="range: [3, 5, 7]")
+    parser.add_argument(
+        "--high_confidence_threshold",
+        type=float,
+        default=0.9,
+        help="range: [0.6, 0.7, 0.8, 0.9]",
+    )
+    parser.add_argument(
+        "--anomaly_cnt_threshold", type=int, default=3, help="range: [3, 5, 7]"
+    )
+
+    # GP MODEL
+    parser.add_argument(
+        "--enable_llm_judge", action="store_true", help="Fixed and do not enable here. "
+    )
 
     # SYSTEM
-    parser.add_argument("--max_turn", type=int,             required=True)
-    parser.add_argument("--task_config", type=str,          required=True)
-    parser.add_argument("--model_config", type=str,         required=True)
-    parser.add_argument("--output_dir", type=str,           required=True)
+    parser.add_argument("-i", "--max_turn", type=int, required=True)
+    parser.add_argument("-t", "--task_config", type=str, required=True)
+    parser.add_argument("-m", "--model_config", type=str, required=True)
+    parser.add_argument("-o", "--output_dir", type=str, required=True)
 
     # OVERWITE AGENT_CONFIG
-    parser.add_argument("--agent_api_key_force", type=str,          default=None)
-    parser.add_argument("--agent_base_url_force", type=str,         default=None)
-    parser.add_argument("--agent_model_name_force", type=str,       default=None)
-    parser.add_argument("--agent_temperature_force", type=float,    default=None)
-    parser.add_argument("--agent_max_tokens_force", type=int,       default=None)
+    parser.add_argument("--agent_api_key_force", type=str, default=None)
+    parser.add_argument("--agent_base_url_force", type=str, default=None)
+    parser.add_argument("--agent_model_name_force", type=str, default=None)
+    parser.add_argument("--agent_temperature_force", type=float, default=None)
+    parser.add_argument("--agent_max_tokens_force", type=int, default=None)
 
-    # ABLATION SETTINGS
+    # BUDGET
+    parser.add_argument("--budget", type=int, default=25)
+
+    # ENGINEERING
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--visualization", action="store_true")
+
     parser.add_argument("--off_pievo", action="store_true")
 
-
     args = parser.parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+    else:
+        logging.getLogger().setLevel(logging.WARNING)
 
     os.environ["HIGH_CONFIDENCE_THRESHOLD"] = str(args.high_confidence_threshold)
     os.environ["NUM_EXPLORATION_CASES"] = str(args.warm_up_rounds)
@@ -365,12 +462,22 @@ async def run_pievo():
 
     os.environ["WORKING_RESULT_DIR"] = os.path.abspath(args.output_dir)
 
+    os.environ["PIEVO_BUDGET"] = str(args.budget)
+
+    project_root = os.getcwd()
+    os.environ["PYTHONPATH"] = (
+        project_root + os.pathsep + os.environ.get("PYTHONPATH", "")
+    )
+
     piflow = await PiFlow.create(
         args,
         task_cfg_path=args.task_config,
         model_cfg_path=args.model_config,
         save_dir=args.output_dir,
     )
+
+    if args.visualization:
+        start_server(piflow.pievo)
 
     stream = piflow.team.run_stream(task=piflow.task)
     await Console(stream, output_stats=True)

@@ -16,13 +16,16 @@ class EmbeddingService:
         Performs last token pooling on the hidden states.
         This is the strategy recommended for the Qwen embedding model.
         """
-        left_padding = (attention_mask[:, -1].sum() == attention_mask.shape[0])
+        left_padding = attention_mask[:, -1].sum() == attention_mask.shape[0]
         if left_padding:
             return last_hidden_states[:, -1]
         else:
             sequence_lengths = attention_mask.sum(dim=1) - 1
             batch_size = last_hidden_states.shape[0]
-            return last_hidden_states[torch.arange(batch_size, device=last_hidden_states.device), sequence_lengths]
+            return last_hidden_states[
+                torch.arange(batch_size, device=last_hidden_states.device),
+                sequence_lengths,
+            ]
 
     def _initialize_local_model(self):
         """
@@ -32,12 +35,29 @@ class EmbeddingService:
         if self.local_tokenizer is None or self.local_model is None:
             from transformers import AutoTokenizer, AutoModel
 
-            # Define the model name
-            model_name = 'Qwen/Qwen3-Embedding-0.6B'
+            # Priority: 1. Current directory .Qwen... 2. Parent directory ...
+            local_path = ".Qwen-Qwen3-Embedding-0.6B"
+            if not os.path.exists(local_path):
+                # Check if we are inside pievo/word/
+                local_path = os.path.abspath(
+                    os.path.join(os.path.dirname(__file__), "..", "..", local_path)
+                )
+
+            if not os.path.exists(local_path):
+                # Fallback to HF name if local path still doesn't exist (not ideal in Docker)
+                model_name = "Qwen/Qwen3-Embedding-0.6B"
+            else:
+                model_name = local_path
 
             # Standard CPU/GPU loading
-            self.local_tokenizer = AutoTokenizer.from_pretrained(model_name, padding_side='left')
-            self.local_model = AutoModel.from_pretrained(model_name)
+            self.local_tokenizer = AutoTokenizer.from_pretrained(
+                model_name,
+                padding_side="left",
+                local_files_only=os.path.exists(local_path),
+            )
+            self.local_model = AutoModel.from_pretrained(
+                model_name, local_files_only=os.path.exists(local_path)
+            )
 
             os.environ["http_proxy"] = ""
             os.environ["https_proxy"] = ""
@@ -48,7 +68,7 @@ class EmbeddingService:
         """
         if sentence in self.embedding_cache:
             return self.embedding_cache[sentence]
-        
+
         self._initialize_local_model()
 
         max_length = 8192  # Max sequence length for the model
@@ -70,7 +90,9 @@ class EmbeddingService:
             outputs = self.local_model(**batch_dict)
 
         # Pool the output hidden states to get the final embedding
-        embedding = self._last_token_pool(outputs.last_hidden_state, batch_dict['attention_mask'])
+        embedding = self._last_token_pool(
+            outputs.last_hidden_state, batch_dict["attention_mask"]
+        )
 
         # Normalize the embedding to a unit vector, as is common practice
         normalized_embedding = F.normalize(embedding, p=2, dim=1)
@@ -80,24 +102,21 @@ class EmbeddingService:
         return normalized_embedding[0].cpu().tolist()
 
     def embed_with_llm(self, sentence: str) -> List[float]:
-        """
-        NOTE: We do not use this LLM embedding due to high cost, we only use the local LLM embedding.
-        """
         from openai import OpenAI
 
         # first match in the cache for avoiding duplicated costing.
         if sentence in self.embedding_cache:
             return self.embedding_cache[sentence]
-        
+
         embedding = (
             OpenAI(
-                base_url=os.environ["EMBEDDING_MODEL_URL"],
-                api_key=os.environ["EMBEDDING_MODEL_API_KEY"],
+                base_url=os.environ["PIFLOW_EMBEDDING_MODEL_URL"],
+                api_key=os.environ["PIFLOW_EMBEDDING_MODEL_API_KEY"],
             )
             .embeddings.create(
-                model=os.environ["EMBEDDING_MODEL_NAME"],
+                model=os.environ["PIFLOW_EMBEDDING_MODEL_NAME"],
                 input=sentence,
-                dimensions=int(os.environ["EMBEDDING_MODEL_DIMENSIONS"]),
+                dimensions=int(os.environ["PIFLOW_EMBEDDING_MODEL_DIMENSIONS"]),
                 encoding_format="float",
             )
             .data[0]
@@ -105,3 +124,8 @@ class EmbeddingService:
         )
         self.embedding_cache[sentence] = embedding
         return embedding
+
+    @staticmethod
+    def get_feature_dim() -> int:
+        """Get the total feature dimension for Bayesian models."""
+        return 4

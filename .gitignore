@@ -211,3 +211,9 @@ __marimo__/
 .DS_Store
 
 .tex
+
+.claude/
+
+.remember/
+
+output/

@@ -20,7 +20,7 @@ class PrincipleAgent(Agent):
         tools: Optional[List[Callable]] = None,
         model_client: OpenAIChatCompletionClient | ChatCompletionClient = None,
         strategy: PiEvo | None = None,
-        **kwargs
+        **kwargs,
     ):
         default_system_message = "You plan the task by decoupling and assignment. "
 
@@ -30,7 +30,7 @@ class PrincipleAgent(Agent):
             model_client=model_client,
             system_message=system_message or default_system_message,
             tools=tools,
-            **kwargs
+            **kwargs,
         )
 
         self.strategy = strategy
@@ -38,8 +38,6 @@ class PrincipleAgent(Agent):
     async def get_pievo_guidance(self) -> str:
         """Generate PiEvo guidance for principle generation"""
         guidance = await self.strategy.get_principle_guidance()
-
-        print(f"\n\n[DEBUG] Guidance for `PrincipleAgent`:\n\n=====================\n{guidance}\n=====================\n", flush=True)
 
         # Update global round: round_by_PHE_order_before_P
         # ONLY +1 HERE!

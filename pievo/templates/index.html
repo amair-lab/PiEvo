@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PiEvo Intelligence Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-light: #f8f9fa;
+            --card-bg: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --accent-blue: #3b82f6;
+            --accent-purple: #8b5cf6;
+            --accent-red: #ef4444;
+            --border-color: #e2e8f0;
+            --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: var(--bg-light);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            padding: 16px 24px;
+            background: var(--card-bg);
+            border-radius: 12px;
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        .logo h1 {
+            margin: 0;
+            font-size: 20px;
+            background: linear-gradient(to right, var(--accent-blue), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            font-weight: 700;
+        }
+
+        .status-badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            background: #eff6ff;
+            color: var(--accent-blue);
+            border: 1px solid #dbeafe;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .status-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background-color: var(--accent-blue);
+            box-shadow: 0 0 0 2px #dbeafe;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+
+            50% {
+                opacity: 0.5;
+                transform: scale(1.2);
+            }
+
+            100% {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        /* Grid Layout */
+        .grid-main {
+            display: grid;
+            grid-template-columns: 3fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .grid-principles {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            /* Principles List | Dual Uncertainty */
+            gap: 24px;
+        }
+
+        .grid-bottom {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .grid-history {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            /* Table | Solution Quality */
+            gap: 24px;
+        }
+
+        .grid-figures {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: var(--shadow-sm);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .card h2 {
+            font-size: 16px;
+            color: var(--text-primary);
+            margin: 0;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            background: #f1f5f9;
+            padding: 4px 10px;
+            border-radius: 8px;
+        }
+
+        .metric-value span {
+            color: var(--accent-blue);
+        }
+
+        /* Principles Accordion */
+        .principles-list {
+            overflow-y: auto;
+            max-height: 700px;
+            padding-right: 4px;
+        }
+
+        details.principle-item {
+            background: #ffffff;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            transition: all 0.2s;
+            overflow: hidden;
+        }
+
+        details.principle-item[open] {
+            box-shadow: var(--shadow-md);
+            border-color: var(--accent-blue);
+        }
+
+        summary.principle-summary {
+            padding: 12px 16px;
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        summary.principle-summary::-webkit-details-marker {
+            display: none;
+        }
+
+        summary.principle-summary:hover {
+            background: #f8fafc;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .principle-id {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.95em;
+        }
+
+        .principle-belief {
+            font-weight: 600;
+            color: var(--accent-blue);
+            font-size: 0.9em;
+            background: #eff6ff;
+            padding: 2px 8px;
+            border-radius: 12px;
+        }
+
+        .belief-bar-bg {
+            height: 4px;
+            background: #f1f5f9;
+            border-radius: 2px;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        .belief-bar-fill {
+            height: 100%;
+            background: linear-gradient(to right, var(--accent-blue), var(--accent-purple));
+            border-radius: 2px;
+            transition: width 0.5s ease-out;
+        }
+
+        .principle-content {
+            padding: 16px;
+            border-top: 1px solid var(--border-color);
+            background: #fcfcfc;
+            font-size: 0.95em;
+            line-height: 1.6;
+        }
+
+        .principle-text {
+            margin-bottom: 16px;
+            color: var(--text-primary);
+        }
+
+        .rational-box {
+            background: #f8fafc;
+            padding: 12px;
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-purple);
+            font-size: 0.9em;
+        }
+
+        .rational-title {
+            font-weight: 600;
+            color: var(--accent-purple);
+            margin-bottom: 8px;
+            display: block;
+            text-transform: uppercase;
+            font-size: 0.8em;
+        }
+
+        .rational-major {
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .rational-list {
+            margin: 0;
+            padding-left: 20px;
+            color: var(--text-secondary);
+        }
+
+        .rational-list li {
+            margin-bottom: 4px;
+        }
+
+        /* Compact Flow */
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .flow-step {
+            display: flex;
+            align-items: center;
+            padding: 10px;
+            border-radius: 8px;
+            background: #ffffff;
+            border: 1px solid transparent;
+            transition: all 0.3s;
+            opacity: 0.6;
+        }
+
+        .flow-step.active {
+            background: #eff6ff;
+            border-color: var(--accent-blue);
+            box-shadow: var(--shadow-sm);
+            opacity: 1;
+            transform: translateX(4px);
+        }
+
+        .step-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: #f1f5f9;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            font-weight: 700;
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .flow-step.active .step-icon {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.9em;
+        }
+
+        .step-desc {
+            font-size: 0.8em;
+            color: var(--text-secondary);
+        }
+
+        /* Tables */
+        .table-container {
+            overflow-x: auto;
+            max-height: 400px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.85em;
+        }
+
+        th {
+            text-align: left;
+            padding: 12px;
+            color: var(--text-secondary);
+            font-weight: 600;
+            border-bottom: 2px solid var(--border-color);
+            background: #f8fafc;
+            position: sticky;
+            top: 0;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+            vertical-align: top;
+        }
+
+        tr:hover td {
+            background: #f8fafc;
+        }
+
+        .badge-anomaly {
+            background: #fef2f2;
+            color: var(--accent-red);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* Figures */
+        .figure-card {
+            background: #ffffff;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            min-height: 300px;
+            border: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .figure-card:hover {
+            transform: scale(1.02);
+            box-shadow: var(--shadow-md);
+            z-index: 10;
+        }
+
+        .figure-img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            display: none;
+            /* Hidden by default until loaded */
+        }
+
+        .figure-placeholder {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: #f8fafc;
+            color: var(--text-secondary);
+            font-size: 0.9em;
+        }
+
+        .spinner {
+            width: 30px;
+            height: 30px;
+            border: 3px solid rgba(59, 130, 246, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--accent-blue);
+            animation: spin 1s ease-in-out infinite;
+            margin-bottom: 10px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">
+                <h1>PiEvo Intelligence</h1>
+            </div>
+            <div class="status-badge">
+                <div class="status-dot"></div>
+                <span id="systemStatus">Initializing System...</span>
+            </div>
+        </div>
+
+        <div class="grid-main">
+            <!-- Left: Principles & Dual Uncertainty -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Active Principles</h2>
+                    <div class="metric-value">System U_EP: <span id="uepValue">-</span></div>
+                </div>
+                <div class="grid-principles">
+                    <div id="principlesList" class="principles-list">
+                        <!-- Populated by JS -->
+                    </div>
+                    <div class="figure-card">
+                        <div class="figure-placeholder">
+                            <div class="spinner"></div>
+                            <p>Waiting for data...</p>
+                        </div>
+                        <img src="/api/figures/Dual_Uncertainty_vs_round.png" class="figure-img"
+                            alt="Dual Uncertainty Evolution"
+                            onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
+                            onerror="this.style.display='none'; this.previousElementSibling.style.display='flex';">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Compact Flow -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Algorithm Flow</h2>
+                </div>
+                <div class="flow-container">
+                    <div id="step-results" class="flow-step">
+                        <div class="step-icon">1</div>
+                        <div class="step-content">
+                            <div class="step-title">Process Results</div>
+                            <div class="step-desc">Analyze outcomes</div>
+                        </div>
+                    </div>
+                    <div id="step-anomalies" class="flow-step">
+                        <div class="step-icon">2</div>
+                        <div class="step-content">
+                            <div class="step-title">Detect Anomalies</div>
+                            <div class="step-desc">Find surprises</div>
+                        </div>
+                    </div>
+                    <div id="step-principles" class="flow-step">
+                        <div class="step-icon">3</div>
+                        <div class="step-content">
+                            <div class="step-title">Update Principles</div>
+                            <div class="step-desc">Refine beliefs</div>
+                        </div>
+                    </div>
+                    <div id="step-hypotheses" class="flow-step">
+                        <div class="step-icon">4</div>
+                        <div class="step-content">
+                            <div class="step-title">Generate Hypotheses</div>
+                            <div class="step-desc">Propose candidates</div>
+                        </div>
+                    </div>
+                    <div id="step-experiment" class="flow-step">
+                        <div class="step-icon">5</div>
+                        <div class="step-content">
+                            <div class="step-title">Select Experiment</div>
+                            <div class="step-desc">Choose best candidate</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid-bottom">
+            <!-- Anomalies -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Detected Anomalies</h2>
+                </div>
+                <div class="table-container">
+                    <table id="anomaliesTable">
+                        <thead>
+                            <tr>
+                                <th>Hypothesis</th>
+                                <th>Expected</th>
+                                <th>Actual</th>
+                                <th>Surprisal</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- History & Solution Quality -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Hypothesis History</h2>
+                </div>
+                <div class="grid-history">
+                    <div class="table-container">
+                        <table id="historyTable">
+                            <thead>
+                                <tr>
+                                    <th>Hypothesis Candidate</th>
+                                    <th>Outcome</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="figure-card">
+                        <div class="figure-placeholder">
+                            <div class="spinner"></div>
+                            <p>Waiting for data...</p>
+                        </div>
+                        <img src="/api/figures/Solution_quality_and_improvement.png" class="figure-img"
+                            alt="Solution Quality"
+                            onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
+                            onerror="this.style.display='none'; this.previousElementSibling.style.display='flex';">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hypothesis Visualization -->
+        <div class="grid-figures">
+            <div class="card">
+                <div class="card-header">
+                    <h2>Hypothesis Embedding (UMAP)</h2>
+                </div>
+                <div class="figure-card">
+                    <div class="figure-placeholder">
+                        <div class="spinner"></div>
+                        <p>Waiting for data...</p>
+                    </div>
+                    <img src="/api/figures/Hypothesis_embedding_UMAP.png" class="figure-img"
+                        alt="Hypothesis Embedding UMAP"
+                        onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
+                        onerror="this.style.display='none'; this.previousElementSibling.style.display='flex';">
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h2>Hypothesis Embedding (PCA)</h2>
+                </div>
+                <div class="figure-card">
+                    <div class="figure-placeholder">
+                        <div class="spinner"></div>
+                        <p>Waiting for data...</p>
+                    </div>
+                    <img src="/api/figures/Hypothesis_embedding_PCA.png" class="figure-img"
+                        alt="Hypothesis Embedding PCA"
+                        onload="this.style.display='block'; this.previousElementSibling.style.display='none';"
+                        onerror="this.style.display='none'; this.previousElementSibling.style.display='flex';">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function updateFlow(status) {
+            document.querySelectorAll('.flow-step').forEach(el => el.classList.remove('active'));
+
+            const s = status.toLowerCase();
+            if (s.includes('process') || s.includes('result')) {
+                document.getElementById('step-results').classList.add('active');
+            } else if (s.includes('anomal')) {
+                document.getElementById('step-anomalies').classList.add('active');
+            } else if (s.includes('principle')) {
+                document.getElementById('step-principles').classList.add('active');
+            } else if (s.includes('hypothes') || s.includes('generat')) {
+                document.getElementById('step-hypotheses').classList.add('active');
+            } else if (s.includes('experiment') || s.includes('select')) {
+                document.getElementById('step-experiment').classList.add('active');
+            }
+        }
+
+        function formatRational(rational) {
+            if (!rational) return '<span style="color: #94a3b8;">No rational available.</span>';
+
+            // If it's already a string, return it
+            if (typeof rational === 'string') return rational;
+
+            // If it's an object (dictionary), parse it
+            if (typeof rational === 'object') {
+                let html = '';
+                if (rational['major premise']) {
+                    html += `<span class="rational-major">${rational['major premise']}</span>`;
+                }
+                if (rational['minor premises'] && Array.isArray(rational['minor premises'])) {
+                    html += '<ul class="rational-list">';
+                    rational['minor premises'].forEach(premise => {
+                        html += `<li>${premise}</li>`;
+                    });
+                    html += '</ul>';
+                }
+                return html || JSON.stringify(rational); // Fallback if keys missing
+            }
+
+            return JSON.stringify(rational);
+        }
+
+        function refreshImages() {
+            // Force reload images by updating src with timestamp
+            document.querySelectorAll('.figure-img').forEach(img => {
+                const src = img.getAttribute('src').split('?')[0];
+                img.src = `${src}?t=${new Date().getTime()}`;
+                img.style.display = 'block'; // Reset display in case it was hidden
+            });
+        }
+
+        function updateData() {
+            // Status
+            fetch('/api/status')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('systemStatus').textContent = data.status;
+                    updateFlow(data.status);
+                });
+
+            // Metrics (for U_EP)
+            fetch('/api/metrics')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.length > 0) {
+                        const lastMetric = data[data.length - 1];
+                        document.getElementById('uepValue').textContent = lastMetric.u_ep ? lastMetric.u_ep.toFixed(4) : '-';
+                    }
+                });
+
+            // Principles
+            fetch('/api/principles')
+                .then(r => r.json())
+                .then(data => {
+                    const container = document.getElementById('principlesList');
+                    // Preserve open state if possible (simple check: if only one open, keep it open?)
+                    // For now, just rebuild. To improve UX, we could track open IDs.
+
+                    container.innerHTML = data.map(p => `
+                        <details class="principle-item">
+                            <summary class="principle-summary">
+                                <div class="summary-header">
+                                    <span class="principle-id">${p.id}</span>
+                                    <span class="principle-belief">${(p.belief * 100).toFixed(1)}%</span>
+                                </div>
+                                <div class="belief-bar-bg">
+                                    <div class="belief-bar-fill" style="width: ${p.belief * 100}%"></div>
+                                </div>
+                            </summary>
+                            <div class="principle-content">
+                                <div class="principle-text">${p.text}</div>
+                                <div class="rational-box">
+                                    <span class="rational-title">Rational</span>
+                                    ${formatRational(p.rational)}
+                                </div>
+                            </div>
+                        </details>
+                    `).join('');
+                });
+
+            // Anomalies (from Principle Logs)
+            fetch('/api/logs/principle')
+                .then(r => r.json())
+                .then(data => {
+                    const tbody = document.querySelector('#anomaliesTable tbody');
+                    let allAnomalies = [];
+                    data.slice(-5).forEach(log => {
+                        if (log.anomalies && log.anomalies.length > 0) {
+                            allAnomalies = allAnomalies.concat(log.anomalies);
+                        }
+                    });
+
+                    tbody.innerHTML = allAnomalies.reverse().slice(0, 10).map(a => `
+                        <tr>
+                            <td style="font-family: monospace; color: var(--accent-blue);">${a.hypothesis ? a.hypothesis.substring(0, 40) + '...' : '-'}</td>
+                            <td>${a.expected !== undefined ? a.expected.toFixed(4) : '-'}</td>
+                            <td>${a.actual !== undefined ? a.actual.toFixed(4) : '-'}</td>
+                            <td><span class="badge-anomaly">${a.surprisal !== undefined ? a.surprisal.toFixed(4) : '-'}</span></td>
+                        </tr>
+                    `).join('');
+                });
+
+            // History
+            fetch('/api/history')
+                .then(r => r.json())
+                .then(data => {
+                    const tbody = document.querySelector('#historyTable tbody');
+                    tbody.innerHTML = data.slice(-20).reverse().map(item => `
+                        <tr>
+                            <td style="font-family: monospace;">${item.hypothesis}</td>
+                            <td style="color: ${item.outcome > 0 ? 'var(--accent-green)' : 'var(--text-secondary)'}">${item.outcome !== null ? item.outcome.toFixed(4) : '-'}</td>
+                        </tr>
+                    `).join('');
+                });
+
+            // Refresh images periodically
+            refreshImages();
+        }
+
+        setInterval(updateData, 5000); // Slower poll for images
+        updateData();
+    </script>
+</body>
+
+</html>

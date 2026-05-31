@@ -7,12 +7,10 @@ from typing import (
     AsyncGenerator,
     Awaitable,
     Callable,
-    Dict,
     List,
     Optional,
     TypeVar,
     Union,
-    cast,
 )
 
 from autogen_agentchat.teams._group_chat._events import GroupChatTermination
@@ -20,7 +18,7 @@ from autogen_ext.ui._rich_console import _image_to_iterm
 from colorama import Fore, Style, init
 
 from autogen_agentchat.ui import UserInputManager
-from autogen_core import CancellationToken, Image
+from autogen_core import CancellationToken
 from autogen_core.models import RequestUsage
 
 from autogen_agentchat.base import Response, TaskResult
@@ -44,6 +42,62 @@ def _is_output_a_tty() -> bool:
     return sys.stdout.isatty()
 
 
+import re
+
+
+def _truncate_base64(text: str) -> str:
+    """Find and truncate base64 strings and large numerical arrays in text."""
+    if not isinstance(text, str):
+        return text
+
+    # 1. Truncate standard data URI base64
+    def replace_b64(match):
+        prefix = match.group(1) or ""
+        b64_content = match.group(2)
+        if len(b64_content) > 50:
+            return f"{prefix}{b64_content[:10]}...[truncated base64, len={len(b64_content)}]{b64_content[-10:]}"
+        return match.group(0)
+
+    text = re.sub(r"(data:[^;]+;base64,)([A-Za-z0-9+/=]{20,})", replace_b64, text)
+
+    # 2. Truncate standalone long base64-like or large binary sequences
+    def replace_standalone(match):
+        s = match.group(0)
+        if len(s) > 80:
+            return f"{s[:15]}...[truncated sequence, len={len(s)}]{s[-15:]}"
+        return s
+
+    text = re.sub(r"[A-Za-z0-9+/=]{80,}", replace_standalone, text)
+
+    # 3. Truncate large numerical arrays (sequential data for plotting)
+    # This improved regex handles scientific notation and complex floats
+    # Match sequences like [0.123, 1.5e-10, ... 10+ times]
+    def replace_array(match):
+        array_str = match.group(0)
+        # Count elements by looking for numbers separated by commas
+        # This is a heuristic to avoid over-truncating tiny lists
+        if array_str.count(",") > 8:
+            # Simple approach: keep the brackets but truncate the inner text
+            # We want to show it's an array but hide the bulk
+            # Find the first few characters after [
+            start = array_str[:30]
+            # Find the last few characters before ]
+            end = array_str[-30:]
+            return f"{start} ... [truncated sequential data] ... {end}"
+        return array_str
+
+    # Match JSON-style arrays of numbers (including scientific notation)
+    # We look for a pattern that matches a list start '[' followed by many floats/ints and ending with ']'
+    # Using a slightly more aggressive matching for large blocks of numbers
+    text = re.sub(
+        r"\[\s*-?\d+\.?\d*[eE]?[+-]?\d*(?:\s*,\s*-?\d+\.?\d*[eE]?[+-]?\d*){10,}\s*\]",
+        replace_array,
+        text,
+    )
+
+    return text
+
+
 def _message_to_str(
     message: AgentEvent | ChatMessage, *, render_image_iterm: bool = False
 ) -> str:
@@ -52,7 +106,7 @@ def _message_to_str(
         result: List[str] = []
         for c in message.content:
             if isinstance(c, str):
-                result.append(c)
+                result.append(_truncate_base64(c))
             else:
                 if render_image_iterm:
                     result.append(_image_to_iterm(c))
@@ -62,16 +116,33 @@ def _message_to_str(
     elif isinstance(message, ToolCallRequestEvent) and len(message.content) >= 1:
         return f"🔧(id={message.content[0].id}) \n{message.content[0].name}({message.content[0].arguments})"
     elif isinstance(message, ToolCallExecutionEvent) and len(message.content) >= 1:
-        return f"⚙️(id={message.content[0].call_id}) \n{json.dumps(eval(message.content[0].content), indent=4)}"
+        try:
+            # Try to parse and format JSON, then truncate base64
+            content = message.content[0].content
+            try:
+                parsed = json.loads(content)
+                formatted = json.dumps(parsed, indent=4)
+            except:
+                # Fallback to eval if it was a python-like repr, but safer to just use string
+                try:
+                    parsed = eval(content)
+                    formatted = json.dumps(parsed, indent=4)
+                except:
+                    formatted = content
+
+            return f"⚙️(id={message.content[0].call_id}) \n{_truncate_base64(formatted)}"
+        except Exception as e:
+            return f"⚙️(id={message.content[0].call_id}) \nError rendering result: {e}"
+
     elif isinstance(message, ToolCallSummaryMessage) and len(message.content) >= 1:
-        return "\n".join(message.content)
+        return _truncate_base64("\n".join(message.content))
     elif isinstance(message, GroupChatTermination):
-        return message.message.content
+        return _truncate_base64(message.message.content)
     else:
         if len(message.content) == 0:
             return "(It seems that there is no any response from the agent)"
         else:
-            return f"{message.content}"
+            return _truncate_base64(f"{message.content}")
 
 
 SyncInputFunc = Callable[[str], str]
@@ -233,7 +304,12 @@ async def Console(
                     flush=True,
                 )
             if isinstance(message, ModelClientStreamingChunkEvent):
-                await aprint(source=message.source, output=message.to_text(), end="")
+                # Truncate chunks if they contain base64 (less common but possible)
+                await aprint(
+                    source=message.source,
+                    output=_truncate_base64(message.to_text()),
+                    end="",
+                )
                 streaming_chunks.append(message.content)
             else:
                 if streaming_chunks:
@@ -241,15 +317,29 @@ async def Console(
                     # Chunked messages are already printed, so we just print a newline.
                     await aprint(message.source, "", end="\n", flush=True)
                 elif isinstance(message, MultiModalMessage):
+                    # MultiModalMessage to_text already handles iterm, but we wrap in truncation for safety
                     await aprint(
                         message.source,
-                        message.to_text(iterm=render_image_iterm),
+                        _truncate_base64(message.to_text(iterm=render_image_iterm)),
                         end="\n",
                         flush=True,
                     )
+                elif isinstance(message, ToolCallExecutionEvent):
+                    # Specialized handling for ToolCallExecutionEvent to ensure truncation
+                    for result in message.content:
+                        truncated_content = _truncate_base64(str(result.content))
+                        output = f"⚙️(id={result.call_id}) \n{truncated_content}"
+                        await aprint(message.source, output, end="\n", flush=True)
+                elif isinstance(message, ToolCallRequestEvent):
+                    for call in message.content:
+                        output = f"🔧(id={call.id}) \n{call.name}({call.arguments})"
+                        await aprint(message.source, output, end="\n", flush=True)
                 else:
                     await aprint(
-                        message.source, message.to_text(), end="\n", flush=True
+                        message.source,
+                        _truncate_base64(message.to_text()),
+                        end="\n",
+                        flush=True,
                     )
                 if message.models_usage:
                     if output_stats:

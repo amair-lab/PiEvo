@@ -1,10 +1,27 @@
 import os
+import re
 import yaml
 import json
 from typing import Dict, Any, Optional, List
 import logging
 
 logger = logging.getLogger(__name__)
+
+_ENV_PATTERN = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-(.*))?\}$")
+
+
+def _expand_env_value(value: Any) -> Any:
+    """Expand ${VAR} or ${VAR:-default} placeholders in loaded config values."""
+    if isinstance(value, dict):
+        return {key: _expand_env_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_expand_env_value(item) for item in value]
+    if isinstance(value, str):
+        match = _ENV_PATTERN.match(value.strip())
+        if match:
+            env_name, default = match.groups()
+            return os.environ.get(env_name, default or "")
+    return value
 
 
 def load_yaml_config(config_path: str) -> Dict[str, Any]:
@@ -19,7 +36,7 @@ def load_yaml_config(config_path: str) -> Dict[str, Any]:
     """
     try:
         with open(config_path, "r") as f:
-            return yaml.safe_load(f)
+            return _expand_env_value(yaml.safe_load(f))
     except Exception as e:
         logger.error(f"Error loading YAML config from {config_path}: {e}")
         return {}
@@ -40,7 +57,7 @@ def load_config(config_path: str) -> Dict[str, Any]:
     elif config_path.endswith(".json"):
         try:
             with open(config_path, "r") as f:
-                return json.load(f)
+                return _expand_env_value(json.load(f))
         except Exception as e:
             logger.error(f"Error loading JSON config from {config_path}: {e}")
             raise FileNotFoundError(config_path)
@@ -177,5 +194,5 @@ def init_results(save_dir, model_cfg_path, model_config, task_cfg_path, task_con
     with open(os.path.join(save_dir, model_cfg_path.split("/")[-1]), "w") as f:
         json.dump(model_config, f, indent=4)
 
-    with open(os.path.join(save_dir, model_cfg_path.split("/")[-1]), "w") as f:
+    with open(os.path.join(save_dir, task_cfg_path.split("/")[-1]), "w") as f:
         json.dump(task_config, f, indent=4)

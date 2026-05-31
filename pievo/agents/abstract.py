@@ -1,4 +1,5 @@
 import abc
+import asyncio
 import logging
 import uuid
 from typing import (
@@ -79,7 +80,7 @@ class Agent(AssistantAgent):
         handoffs = self._handoffs
         model_client = self._model_client
         model_client_stream = self._model_client_stream
-        reflect_on_tool_use = True
+        reflect_on_tool_use = False
         max_tool_iterations = self._max_tool_iterations
         tool_call_summary_format = self._tool_call_summary_format
         tool_call_summary_formatter = self._tool_call_summary_formatter
@@ -87,16 +88,80 @@ class Agent(AssistantAgent):
 
         # STEP 1: Add new user/handoff messages to the model context
         # Validate and filter messages before adding to context
+        from pievo.group.manage import pievo_log
+
+        pievo_log(
+            f"Processing {len(messages)} messages for {agent_name}",
+            source=f"Agent:{agent_name}",
+            tag="on_messages_start",
+        )
+
+        # Check if this agent supports vision
+        has_vision = getattr(self._model_client, "model_info", {}).get("vision", False)
+
         valid_messages = []
         for msg in messages:
-            if hasattr(msg, "content") and msg.content:
-                valid_messages.append(msg)
-                event_logger.debug(
-                    f"📨 Adding valid message from {getattr(msg, 'source', 'unknown')}: {str(msg.content)[:100]}..."
+            if hasattr(msg, "content") and msg.content is not None:
+                # Vision filtering logic
+                content = msg.content
+                if not has_vision and isinstance(content, list):
+                    # Filter out Image parts for non-vision agents
+                    filtered_content = [
+                        c
+                        for c in content
+                        if not (
+                            hasattr(c, "data")
+                            or hasattr(c, "url")
+                            or type(c).__name__ == "Image"
+                        )
+                    ]
+                    if len(filtered_content) == 1 and isinstance(
+                        filtered_content[0], str
+                    ):
+                        content = filtered_content[0]
+                    else:
+                        content = filtered_content
+
+                    pievo_log(
+                        f"Vision filtering: Stripped image parts for non-vision agent {agent_name}",
+                        source=f"Agent:{agent_name}",
+                        tag="vision_filter",
+                    )
+
+                # Create a new message object if content was modified, or use original
+                # Note: To avoid mutating the original message which might be used by other agents,
+                # we should ideally pass a modified version to _add_messages_to_context
+                # AssistantAgent._add_messages_to_context typically handles ChatMessage
+
+                # Check for multimodal status for logging
+                content_type = type(content).__name__
+                is_multimodal = isinstance(content, list)
+                parts_info = ""
+                if is_multimodal:
+                    parts_info = f" parts: {[type(c).__name__ for c in content]}"
+
+                pievo_log(
+                    f"Adding valid message from {getattr(msg, 'source', 'unknown')}. Type: {content_type}, Multi: {is_multimodal}{parts_info}",
+                    source=f"Agent:{agent_name}",
+                    tag="context_update",
                 )
+
+                # If we modified the content, we need to pass a message with modified content
+                if content is not msg.content:
+                    # Create a shallow copy or a new message of the same type with new content
+                    import copy
+
+                    msg_copy = copy.copy(msg)
+                    msg_copy.content = content
+                    valid_messages.append(msg_copy)
+                else:
+                    valid_messages.append(msg)
             else:
-                event_logger.warning(
-                    f"⚠️ Skipping empty message from {getattr(msg, 'source', 'unknown')}"
+                pievo_log(
+                    f"Skipping null content message from {getattr(msg, 'source', 'unknown')}",
+                    source=f"Agent:{agent_name}",
+                    tag="context_skip",
+                    level="WARNING",
                 )
 
         if valid_messages:
@@ -124,21 +189,9 @@ class Agent(AssistantAgent):
         model_result = None
         system_messages = list(system_messages)
 
-
-        # [STEP OMNI] FOR **ALL**: Listen for all messages for all baselines & PiFlow.
-        # NOTE: =============== For PiEvo computation (and yield the suggestion / strategy) ===============
-        #       This block does not conduct the internal mechanism of PiEvo, but be opened for all cases ON-OFF pievo,
-        #       the reason to keep it is only to collect chatting history of agents structurly. 
         if self.strategy:
             self.strategy.gather_submission_from_message(messages)
-        
 
-        # =================== Handle the different reasoning modes =================== 
-        
-        # NOTE: This code block serve as a prompt injection implicitly, where it operates on the Agent's context.
-        #       But it does not appear to the main context of the group chatting.
-        #       So it is good enough for serving as a steering support.
-        #       Create a temporary context with the flow message for this inference. 
         if not self.strategy.off_pievo:
             await model_context.add_message(
                 UserMessage(content=await self.get_pievo_guidance(), source="user")
@@ -147,47 +200,52 @@ class Agent(AssistantAgent):
             event_logger.warning(
                 f"⚠️ Currently, you are running without PiEvo for agent `{agent_name}`, only workable in ablation period. "
             )
-        
-        # =================== Handle the different reasoning modes =================== 
 
+        # =================== Handle the different reasoning modes ===================
 
-        try:
-            async for inference_output in self._call_llm(
-                model_client=model_client,
-                model_client_stream=model_client_stream,
-                system_messages=system_messages,
-                model_context=model_context,
-                workbench=workbench,
-                handoff_tools=handoff_tools,
-                agent_name=agent_name,
-                cancellation_token=cancellation_token,
-                output_content_type=output_content_type,
-                message_id=message_id,
-            ):
-                if isinstance(inference_output, CreateResult):
-                    model_result = inference_output
-                    if not model_result.content:
-                        event_logger.warning(
-                            f"⚠️ LLM returned empty content for {agent_name}"
-                        )
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                async for inference_output in self._call_llm(
+                    model_client=model_client,
+                    model_client_stream=model_client_stream,
+                    system_messages=system_messages,
+                    model_context=model_context,
+                    workbench=workbench,
+                    handoff_tools=handoff_tools,
+                    agent_name=agent_name,
+                    cancellation_token=cancellation_token,
+                    output_content_type=output_content_type,
+                    message_id=message_id,
+                ):
+                    if isinstance(inference_output, CreateResult):
+                        model_result = inference_output
+                        if not model_result.content:
+                            event_logger.warning(
+                                f"⚠️ LLM returned empty content for {agent_name}"
+                            )
+                    else:
+                        # Streaming chunk event
+                        yield inference_output
+                break  # success — exit retry loop
+            except Exception as e:
+                event_logger.error(
+                    f"❌ LLM call failed for {agent_name} (attempt {attempt}/{max_attempts}): {e}"
+                )
+                if attempt < max_attempts:
+                    wait = 5 * attempt  # 5s, 10s, 15s, 20s
+                    event_logger.warning(f"⏳ Retrying in {wait}s...")
+                    await asyncio.sleep(wait)
                 else:
-                    # Streaming chunk event
-                    yield inference_output
-        except Exception as e:
-            event_logger.error(f"❌ LLM call failed for {agent_name}: {e}")
-
-            # Create a fallback result
-            model_result = CreateResult(
-                finish_reason="stop",
-                content=f"[Meta Class of Agent] Error in LLM processing. Please check the history management or model call. Error: {str(e)}",
-                usage=RequestUsage(prompt_tokens=0, completion_tokens=0),
-                cached=False,
-                logprobs=None,
-                thought=None,
-            )
-
-            raise ConnectionError(e)
-        
+                    model_result = CreateResult(
+                        finish_reason="stop",
+                        content=f"[Meta Class of Agent] Error in LLM processing. Please check the history management or model call. Error: {str(e)}",
+                        usage=RequestUsage(prompt_tokens=0, completion_tokens=0),
+                        cached=False,
+                        logprobs=None,
+                        thought=None,
+                    )
+                    raise ConnectionError(e)
 
         # --- If the model produced a hidden "thought," yield it as an event ---
         if model_result.thought:
@@ -229,8 +287,7 @@ class Agent(AssistantAgent):
         ):
             yield output_event
 
-    
-    # This will be called only if self.strategy is True (or an PiEvo class). 
+    # This will be called only if self.strategy is True (or an PiEvo class).
     async def get_pievo_guidance(self) -> str:
         """Generate PiEvo guidance - should be implemented by subclasses"""
         raise NotImplementedError("No specific guidance available.")

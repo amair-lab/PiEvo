@@ -14,7 +14,7 @@ class HypothesisAgent(Agent):
         name: str = "Analysis_Agent",
         system_message: Optional[str] = None,
         tools: Optional[List[Callable]] = None,
-        **kwargs
+        **kwargs,
     ):
         default_system_message = """You are a Hypothesis Agent specialized in formulating, refining, and testing 
         scientific hypotheses about Large Language Models. Your expertise lies in connecting theoretical frameworks 
@@ -27,7 +27,7 @@ class HypothesisAgent(Agent):
             name=name,
             system_message=system_message or default_system_message,
             tools=tools,
-            **kwargs
+            **kwargs,
         )
 
     async def get_pievo_guidance(self) -> str:
@@ -35,5 +35,5 @@ class HypothesisAgent(Agent):
 
         guidance = await self.strategy.get_hypothesis_guidance()
 
-        print(f"\n\n[DEBUG] Guidance for `HypothesisAgent`:\n\n=====================\n{guidance}\n=====================\n", flush=True)
+        # print(f"\n\n[DEBUG] Guidance for `HypothesisAgent`:\n\n=====================\n{guidance}\n=====================\n", flush=True)
         return guidance
