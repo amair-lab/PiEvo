@@ -235,6 +235,48 @@ PiEvo/
 
 ---
 
+## Use Surrogate Models in Our Paper?
+
+We fully support and release the weights and architectures of the surrogate models for reproducing purposes. You can simply run the following commands:
+
+```bash
+# Go to the surrogate folder
+cd surrogates/
+
+# We recommend to use conda for preparing the env. 
+conda create -f envs/environment.yml
+
+# Note that, this env is also workable for PiFlow method (see citation for more details). 
+conda activate pievo-surrogates
+
+# Launch the server to listen the `127.0.0.1:12600`, this will setup all 4 tasks at once. 
+python envs/launch.py --config envs/config.yaml
+
+# (Optional) Check the tools' accessibility.
+python envs/check_tools.py
+```
+
+You will see some outputs like this if the surrogate works well:
+
+```text
+[SYSTEM] Testing ChEMBL prediction...
+Status Code: 200
+{
+  "error_msg": "",
+  "input": "CC(=O)Oc1ccccc1C(=O)O",
+  "output": 1.3771543502807617,
+  "success": true
+}
+
+... (and other 3 tasks demo output)
+```
+
+Then, you should keep this terminal window active and run `pievo` in another terminal as above tutorial. 
+
+We also kindly welcome the community to enrich and provide more scientific domains with their specific `surrogate models` to this repo, PR is always welcome! 
+
+---
+
 ## Positioning
 
 PiEvo is best understood as a framework for **principle-aware autonomous scientific discovery**:

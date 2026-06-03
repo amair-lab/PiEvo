@@ -1,0 +1,3 @@
+input_size: 470
+epoch: 991
+best_r2: 0.909181
